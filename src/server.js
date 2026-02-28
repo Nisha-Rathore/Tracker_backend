@@ -11,12 +11,27 @@ const maxPortRetries = Number(process.env.PORT_RETRIES || 10);
 const start = async () => {
   await connectDB();
 
+  const allowedOrigins = [
+  "http://localhost:5173",
+  "https://attendance-tracker-nisha.netlify.app"
+];
+
+
   const server = http.createServer(app);
   const io = new Server(server, {
     cors: {
-      origin: process.env.CLIENT_URL,
-      methods: ["GET", "POST"]
-    }
+     origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST"],
+    credentials: true
+  }
   });
 
   io.on("connection", (socket) => {

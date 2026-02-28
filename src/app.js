@@ -16,15 +16,15 @@ const explicitOrigins = [
   ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : [])
 ];
 
+const allowedOrigins = [
+  ...new Set([
+    "https://attendance-tracker-nisha.netlify.app",
+    ...explicitOrigins
+  ])
+];
+
 app.use(helmet());
 app.use(
-  cors({
-    origin: "https://attendance-tracker-nisha.netlify.app",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
-/* app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
@@ -34,15 +34,16 @@ app.use(
         return callback(null, true);
       }
 
-      if (explicitOrigins.includes(origin)) {
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
       return callback(new Error("CORS origin not allowed"));
     },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true
   })
-); */
+);
 app.use(morgan("dev"));
 app.use(express.json());
 
