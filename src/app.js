@@ -19,7 +19,7 @@ const explicitOrigins = [
 app.use(helmet());
 app.use(
   cors({
-    origin: "https://meek-griffin-bd2741.netlify.app",
+    origin: "https://attendance-tracker-nisha.netlify.app",
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
