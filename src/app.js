@@ -17,7 +17,8 @@ const explicitOrigins = [
 ];
 
 app.use(helmet());
-app.use(
+app.use(cors());
+/* app.use(
   cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
@@ -35,7 +36,7 @@ app.use(
     },
     credentials: true
   })
-);
+); */
 app.use(morgan("dev"));
 app.use(express.json());
 
