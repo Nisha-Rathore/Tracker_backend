@@ -17,7 +17,13 @@ const explicitOrigins = [
 ];
 
 app.use(helmet());
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://meek-griffin-bd2741.netlify.app",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 /* app.use(
   cors({
     origin: (origin, callback) => {
