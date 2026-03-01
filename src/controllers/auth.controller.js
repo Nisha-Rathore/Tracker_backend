@@ -2,6 +2,8 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import { generateToken } from "../utils/generateToken.js";
 
+const getRedirectPath = (role) => (role === "manager" ? "/manager/dashboard" : "/dashboard");
+
 export const register = async (req, res) => {
   const { name, email, password, role } = req.body;
 
@@ -20,7 +22,8 @@ export const register = async (req, res) => {
   const token = generateToken({ userId: user._id, role: user.role });
   res.status(201).json({
     token,
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    user: { id: user._id, name: user.name, email: user.email, role: user.role },
+    redirectTo: getRedirectPath(user.role)
   });
 };
 
@@ -44,6 +47,7 @@ export const login = async (req, res) => {
   const token = generateToken({ userId: user._id, role: user.role });
   res.json({
     token,
-    user: { id: user._id, name: user.name, email: user.email, role: user.role }
+    user: { id: user._id, name: user.name, email: user.email, role: user.role },
+    redirectTo: getRedirectPath(user.role)
   });
 };

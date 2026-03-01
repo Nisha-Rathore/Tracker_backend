@@ -11,27 +11,51 @@ const maxPortRetries = Number(process.env.PORT_RETRIES || 10);
 const start = async () => {
   await connectDB();
 
+  const explicitOrigins = [
+    ...(process.env.CLIENT_URLS || "").split(",").map((v) => v.trim()).filter(Boolean),
+    ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : [])
+  ];
+
   const allowedOrigins = [
-  "http://localhost:5173",
-  "https://attendance-tracker-nisha.netlify.app"
-];
+    ...new Set([
+      "https://attendance-tracker-nisha.netlify.app",
+      ...explicitOrigins
+    ])
+  ];
+
+  const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    if (isLocalhost) return true;
+
+    return allowedOrigins.includes(origin);
+  };
 
 
   const server = http.createServer(app);
   const io = new Server(server, {
+    transports: ["websocket", "polling"],
+    allowEIO3: true,
     cors: {
-     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
+      origin: (origin, callback) => {
+        if (isAllowedOrigin(origin)) {
+          return callback(null, true);
+        }
 
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST"],
-    credentials: true
-  }
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+      },
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      credentials: true
+    }
+  });
+
+  io.engine.on("connection_error", (err) => {
+    console.error("Socket connection error", {
+      code: err.code,
+      message: err.message,
+      origin: err.req?.headers?.origin
+    });
   });
 
   io.on("connection", (socket) => {
