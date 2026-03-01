@@ -7,20 +7,15 @@ import { setSocketServer } from "./config/socket.js";
 
 const basePort = Number(process.env.PORT || 5000);
 const maxPortRetries = Number(process.env.PORT_RETRIES || 10);
-const requiredEnv = ["MONGO_URI", "JWT_SECRET"];
-
-for (const name of requiredEnv) {
-  if (!process.env[name]) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-}
 
 const start = async () => {
   await connectDB();
 
+  const normalizeOrigin = (value = "") => String(value).trim().replace(/\/$/, "");
+
   const explicitOrigins = [
-    ...(process.env.CLIENT_URLS || "").split(",").map((v) => v.trim()).filter(Boolean),
-    ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : [])
+    ...(process.env.CLIENT_URLS || "").split(",").map(normalizeOrigin).filter(Boolean),
+    ...(process.env.CLIENT_URL ? [normalizeOrigin(process.env.CLIENT_URL)] : [])
   ];
 
   const allowedOrigins = [
@@ -33,17 +28,16 @@ const start = async () => {
   const isAllowedOrigin = (origin) => {
     if (!origin) return true;
 
-    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+    const normalizedOrigin = normalizeOrigin(origin);
+    const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalizedOrigin);
     if (isLocalhost) return true;
 
-    return allowedOrigins.includes(origin);
+    return allowedOrigins.includes(normalizedOrigin);
   };
-
 
   const server = http.createServer(app);
   const io = new Server(server, {
     transports: ["websocket", "polling"],
-    allowEIO3: true,
     cors: {
       origin: (origin, callback) => {
         if (isAllowedOrigin(origin)) {
@@ -55,14 +49,6 @@ const start = async () => {
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       credentials: true
     }
-  });
-
-  io.engine.on("connection_error", (err) => {
-    console.error("Socket connection error", {
-      code: err.code,
-      message: err.message,
-      origin: err.req?.headers?.origin
-    });
   });
 
   io.on("connection", (socket) => {
@@ -96,20 +82,6 @@ const start = async () => {
   });
 
   listen(basePort);
-
-  const shutdown = (signal) => {
-    console.log(`${signal} received. Closing server...`);
-    server.close((err) => {
-      if (err) {
-        console.error("Error during server shutdown", err);
-        process.exit(1);
-      }
-      process.exit(0);
-    });
-  };
-
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
 };
 
 start().catch((err) => {

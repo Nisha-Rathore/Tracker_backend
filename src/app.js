@@ -8,16 +8,14 @@ import managerRoutes from "./routes/manager.routes.js";
 import exportRoutes from "./routes/export.routes.js";
 import requestRoutes from "./routes/request.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
-import { sanitizeRequest } from "./middleware/sanitize.js";
-import { sendSuccess } from "./utils/http.js";
 
 const app = express();
-app.disable("x-powered-by");
-app.set("trust proxy", 1);
+
+const normalizeOrigin = (value = "") => String(value).trim().replace(/\/$/, "");
 
 const explicitOrigins = [
-  ...(process.env.CLIENT_URLS || "").split(",").map((v) => v.trim()).filter(Boolean),
-  ...(process.env.CLIENT_URL ? [process.env.CLIENT_URL.trim()] : [])
+  ...(process.env.CLIENT_URLS || "").split(",").map(normalizeOrigin).filter(Boolean),
+  ...(process.env.CLIENT_URL ? [normalizeOrigin(process.env.CLIENT_URL)] : [])
 ];
 
 const allowedOrigins = [
@@ -27,40 +25,39 @@ const allowedOrigins = [
   ])
 ];
 
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+
+  const normalizedOrigin = normalizeOrigin(origin);
+  const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(normalizedOrigin);
+  if (isLocalhost) return true;
+
+  return allowedOrigins.includes(normalizedOrigin);
+};
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS origin not allowed: ${origin}`));
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+  optionsSuccessStatus: 204,
+  maxAge: 86400
+};
+
 app.use(helmet());
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-
-      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
-      if (process.env.NODE_ENV !== "production" && isLocalhost) {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
-
-      return callback(new Error("CORS origin not allowed"));
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-    maxAge: 86400,
-    optionsSuccessStatus: 204
-  })
-);
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(morgan("dev"));
-app.use(express.json({ limit: "100kb" }));
-app.use(express.urlencoded({ extended: true, limit: "100kb" }));
-app.use(sanitizeRequest);
+app.use(express.json());
 
 app.get("/api/health", (req, res) => {
-  return sendSuccess(res, {
-    message: "Service healthy",
-    data: { ok: true, timestamp: new Date().toISOString() }
-  });
+  res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
 app.use("/api/auth", authRoutes);

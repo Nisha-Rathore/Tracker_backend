@@ -3,12 +3,20 @@ import User from "../models/User.js";
 import { AppError, asyncHandler } from "../utils/http.js";
 
 export const protect = asyncHandler(async (req, res, next) => {
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith("Bearer ")) {
+  const authHeader = req.headers.authorization || "";
+  const tokenFromAuthHeader = /^Bearer\s+/i.test(authHeader)
+    ? authHeader.replace(/^Bearer\s+/i, "").trim()
+    : authHeader.trim();
+  const token =
+    tokenFromAuthHeader ||
+    req.headers["x-access-token"] ||
+    req.headers["x-auth-token"] ||
+    req.query.token;
+
+  if (!token) {
     throw new AppError("Unauthorized", 401);
   }
 
-  const token = header.split(" ")[1];
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
   const user = await User.findById(decoded.userId).select("_id name email role").lean();
 
