@@ -25,5 +25,14 @@ const attendanceSchema = new mongoose.Schema(
 );
 
 attendanceSchema.index({ user: 1, clockIn: -1 });
+attendanceSchema.index({ clockIn: -1 });
+attendanceSchema.index(
+  { user: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { clockOut: { $exists: false } },
+    name: "unique_open_attendance_per_user"
+  }
+);
 
 export default mongoose.model("Attendance", attendanceSchema);

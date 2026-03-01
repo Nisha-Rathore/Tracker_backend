@@ -1,5 +1,8 @@
 import Attendance from "../models/Attendance.js";
 import { getIO } from "../config/socket.js";
+import mongoose from "mongoose";
+import { AppError, asyncHandler, sendSuccess } from "../utils/http.js";
+import { buildPaginationMeta, getPagination } from "../utils/pagination.js";
 
 const OFFICE_IP = process.env.OFFICE_IP || "";
 
@@ -29,19 +32,23 @@ const buildLocationPayload = (req, location = {}) => ({
   officeAddress: location.officeAddress || null
 });
 
-export const getAttendanceSummary = async (req, res) => {
+export const getAttendanceSummary = asyncHandler(async (req, res) => {
   const userId = req.user._id;
-  const latest = await Attendance.findOne({ user: userId }).sort({ clockIn: -1 });
-  const open = await Attendance.findOne({ user: userId, clockOut: { $exists: false } }).sort({ clockIn: -1 });
+  const [latest, open] = await Promise.all([
+    Attendance.findOne({ user: userId }).sort({ clockIn: -1 }).lean(),
+    Attendance.findOne({ user: userId, clockOut: { $exists: false } }).sort({ clockIn: -1 }).lean()
+  ]);
 
-  res.json({
-    status: open ? "present" : "absent",
-    lastAttendance: latest,
-    currentLocation: open?.locationIn || latest?.locationIn || null
+  return sendSuccess(res, {
+    data: {
+      status: open ? "present" : "absent",
+      lastAttendance: latest || null,
+      currentLocation: open?.locationIn || latest?.locationIn || null
+    }
   });
-};
+});
 
-export const clockIn = async (req, res) => {
+export const clockIn = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { location } = req.body;
 
@@ -52,7 +59,7 @@ export const clockIn = async (req, res) => {
   });
 
   if (existing) {
-    return res.status(409).json({ message: "Already clocked in" });
+    throw new AppError("Already clocked in", 409);
   }
 
   const attendance = await Attendance.create({
@@ -63,10 +70,14 @@ export const clockIn = async (req, res) => {
   });
 
   getIO()?.emit("attendanceUpdate", { userId: String(userId), action: "clockin" });
-  res.status(201).json({ message: "Clocked in successfully", attendance });
-};
+  return sendSuccess(res, {
+    statusCode: 201,
+    message: "Clocked in successfully",
+    data: { attendance }
+  });
+});
 
-export const clockOut = async (req, res) => {
+export const clockOut = asyncHandler(async (req, res) => {
   const userId = req.user._id;
   const { location } = req.body;
 
@@ -76,7 +87,7 @@ export const clockOut = async (req, res) => {
   }).sort({ clockIn: -1 });
 
   if (!openAttendance) {
-    return res.status(409).json({ message: "No active clock-in found" });
+    throw new AppError("No active clock-in found", 409);
   }
 
   openAttendance.clockOut = new Date();
@@ -85,11 +96,30 @@ export const clockOut = async (req, res) => {
   await openAttendance.save();
 
   getIO()?.emit("attendanceUpdate", { userId: String(userId), action: "clockout" });
-  res.json({ message: "Clocked out successfully", attendance: openAttendance });
-};
+  return sendSuccess(res, {
+    message: "Clocked out successfully",
+    data: { attendance: openAttendance }
+  });
+});
 
-export const getHistory = async (req, res) => {
-  const query = req.user.role === "manager" && req.query.userId ? { user: req.query.userId } : { user: req.user._id };
-  const records = await Attendance.find(query).sort({ clockIn: -1 }).limit(365);
-  res.json({ records });
-};
+export const getHistory = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query, { defaultLimit: 30, maxLimit: 365 });
+
+  const query = { user: req.user._id };
+  if (req.user.role === "manager" && req.query.userId) {
+    if (!mongoose.Types.ObjectId.isValid(req.query.userId)) {
+      throw new AppError("Invalid userId", 400);
+    }
+    query.user = req.query.userId;
+  }
+
+  const [records, total] = await Promise.all([
+    Attendance.find(query).sort({ clockIn: -1 }).skip(skip).limit(limit).lean(),
+    Attendance.countDocuments(query)
+  ]);
+
+  return sendSuccess(res, {
+    data: { records },
+    meta: buildPaginationMeta({ page, limit, total })
+  });
+});

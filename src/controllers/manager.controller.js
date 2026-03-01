@@ -1,6 +1,9 @@
 import User from "../models/User.js";
 import Attendance from "../models/Attendance.js";
 import WorkRequest from "../models/WorkRequest.js";
+import mongoose from "mongoose";
+import { AppError, asyncHandler, sendSuccess } from "../utils/http.js";
+import { buildPaginationMeta, getPagination } from "../utils/pagination.js";
 
 const start = () => {
   const d = new Date();
@@ -14,28 +17,34 @@ const end = () => {
   return d;
 };
 
-export const getDashboard = async (req, res) => {
+export const getDashboard = asyncHandler(async (req, res) => {
   const filter = req.query.filter || "all";
+  const { page, limit, skip } = getPagination(req.query, { defaultLimit: 25, maxLimit: 100 });
 
-  const employees = await User.find({ role: "employee" }).select("name email");
+  const employees = await User.find({ role: "employee" }).select("name email").lean();
   const employeeIds = employees.map((emp) => emp._id);
-  const todayRecords = await Attendance.find({ clockIn: { $gte: start(), $lte: end() } }).sort({ clockIn: -1 });
-  const latestRecords = await Attendance.find({ user: { $in: employeeIds } }).sort({ clockIn: -1 });
+
+  const [todayRecords, latestRecords] = await Promise.all([
+    Attendance.aggregate([
+      { $match: { user: { $in: employeeIds }, clockIn: { $gte: start(), $lte: end() } } },
+      { $sort: { clockIn: -1 } },
+      { $group: { _id: "$user", record: { $first: "$$ROOT" } } }
+    ]),
+    Attendance.aggregate([
+      { $match: { user: { $in: employeeIds } } },
+      { $sort: { clockIn: -1 } },
+      { $group: { _id: "$user", record: { $first: "$$ROOT" } } }
+    ])
+  ]);
 
   const latestByUser = new Map();
   for (const record of todayRecords) {
-    const key = String(record.user);
-    if (!latestByUser.has(key)) {
-      latestByUser.set(key, record);
-    }
+    latestByUser.set(String(record._id), record.record);
   }
 
   const overallLatestByUser = new Map();
   for (const record of latestRecords) {
-    const key = String(record.user);
-    if (!overallLatestByUser.has(key)) {
-      overallLatestByUser.set(key, record);
-    }
+    overallLatestByUser.set(String(record._id), record.record);
   }
 
   let rows = employees.map((emp) => {
@@ -57,49 +66,87 @@ export const getDashboard = async (req, res) => {
   if (filter === "absent") rows = rows.filter((r) => r.status === "absent");
   if (filter === "today") rows = rows.filter((r) => Boolean(r.today));
 
-  res.json({ employees: rows });
-};
+  const total = rows.length;
+  const pagedRows = rows.slice(skip, skip + limit);
 
-export const getRequests = async (req, res) => {
+  return sendSuccess(res, {
+    data: { employees: pagedRows },
+    meta: buildPaginationMeta({ page, limit, total })
+  });
+});
+
+export const getRequests = asyncHandler(async (req, res) => {
   const status = req.query.status || "all";
   const query = ["pending", "approved", "rejected"].includes(status) ? { status } : {};
+  const { page, limit, skip } = getPagination(req.query, { defaultLimit: 25, maxLimit: 200 });
 
-  const requests = await WorkRequest.find(query)
-    .populate("user", "name email")
-    .sort({ createdAt: -1 })
-    .limit(200);
+  const [requests, total] = await Promise.all([
+    WorkRequest.find(query)
+      .populate("user", "name email")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    WorkRequest.countDocuments(query)
+  ]);
 
-  res.json({ requests });
-};
+  return sendSuccess(res, {
+    data: { requests },
+    meta: buildPaginationMeta({ page, limit, total })
+  });
+});
 
-export const updateRequestStatus = async (req, res) => {
+export const updateRequestStatus = asyncHandler(async (req, res) => {
   const { requestId } = req.params;
   const { status } = req.body;
 
+  if (!mongoose.Types.ObjectId.isValid(requestId)) {
+    throw new AppError("Invalid requestId", 400);
+  }
+
   if (!["approved", "rejected"].includes(status)) {
-    return res.status(400).json({ message: "Status must be approved or rejected" });
+    throw new AppError("Status must be approved or rejected", 400);
   }
 
-  const request = await WorkRequest.findById(requestId);
+  const request = await WorkRequest.findByIdAndUpdate(
+    requestId,
+    { $set: { status } },
+    { new: true, runValidators: true }
+  ).populate("user", "name email");
+
   if (!request) {
-    return res.status(404).json({ message: "Request not found" });
+    throw new AppError("Request not found", 404);
   }
 
-  request.status = status;
-  await request.save();
+  return sendSuccess(res, {
+    message: `Request ${status}`,
+    data: { request }
+  });
+});
 
-  const populated = await WorkRequest.findById(request._id).populate("user", "name email");
-  res.json({ message: `Request ${status}`, request: populated });
-};
+export const getAttendanceHistory = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query, { defaultLimit: 50, maxLimit: 500 });
+  const query = {};
 
-export const getAttendanceHistory = async (req, res) => {
-  const limit = Math.min(Number(req.query.limit || 100), 500);
-  const query = req.query.userId ? { user: req.query.userId } : {};
+  if (req.query.userId) {
+    if (!mongoose.Types.ObjectId.isValid(req.query.userId)) {
+      throw new AppError("Invalid userId", 400);
+    }
+    query.user = req.query.userId;
+  }
 
-  const records = await Attendance.find(query)
-    .populate("user", "name email")
-    .sort({ clockIn: -1 })
-    .limit(limit);
+  const [records, total] = await Promise.all([
+    Attendance.find(query)
+      .populate("user", "name email")
+      .sort({ clockIn: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Attendance.countDocuments(query)
+  ]);
 
-  res.json({ records });
-};
+  return sendSuccess(res, {
+    data: { records },
+    meta: buildPaginationMeta({ page, limit, total })
+  });
+});

@@ -1,25 +1,32 @@
 import WorkRequest from "../models/WorkRequest.js";
+import { AppError, asyncHandler, sendSuccess } from "../utils/http.js";
+import { buildPaginationMeta, getPagination } from "../utils/pagination.js";
 
-export const createRequest = async (req, res) => {
+export const createRequest = asyncHandler(async (req, res) => {
   const { type, dateFrom, dateTo, reason } = req.body;
   const allowedTypes = ["leave", "remote"];
 
   if (!type || !dateFrom || !dateTo || !reason) {
-    return res.status(400).json({ message: "Type, date range, and reason are required" });
+    throw new AppError("Type, date range, and reason are required", 400);
   }
   if (!allowedTypes.includes(type)) {
-    return res.status(400).json({ message: "Request type must be leave or remote" });
+    throw new AppError("Request type must be leave or remote", 400);
   }
 
   const from = new Date(dateFrom);
   const to = new Date(dateTo);
 
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
-    return res.status(400).json({ message: "Invalid dates provided" });
+    throw new AppError("Invalid dates provided", 400);
   }
 
   if (from > to) {
-    return res.status(400).json({ message: "From date cannot be after To date" });
+    throw new AppError("From date cannot be after To date", 400);
+  }
+
+  const normalizedReason = String(reason).trim();
+  if (normalizedReason.length < 5) {
+    throw new AppError("Reason must be at least 5 characters", 400);
   }
 
   const request = await WorkRequest.create({
@@ -27,13 +34,27 @@ export const createRequest = async (req, res) => {
     type,
     dateFrom: from,
     dateTo: to,
-    reason: reason.trim()
+    reason: normalizedReason
   });
 
-  res.status(201).json({ message: "Request submitted successfully", request });
-};
+  return sendSuccess(res, {
+    statusCode: 201,
+    message: "Request submitted successfully",
+    data: { request }
+  });
+});
 
-export const getMyRequests = async (req, res) => {
-  const requests = await WorkRequest.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(100);
-  res.json({ requests });
-};
+export const getMyRequests = asyncHandler(async (req, res) => {
+  const { page, limit, skip } = getPagination(req.query, { defaultLimit: 20, maxLimit: 100 });
+  const query = { user: req.user._id };
+
+  const [requests, total] = await Promise.all([
+    WorkRequest.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    WorkRequest.countDocuments(query)
+  ]);
+
+  return sendSuccess(res, {
+    data: { requests },
+    meta: buildPaginationMeta({ page, limit, total })
+  });
+});

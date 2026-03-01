@@ -1,10 +1,15 @@
 import { Parser } from "json2csv";
 import PDFDocument from "pdfkit";
 import Attendance from "../models/Attendance.js";
+import mongoose from "mongoose";
+import { AppError, asyncHandler } from "../utils/http.js";
 
 const resolveQuery = (req) => {
   if (req.user.role === "manager") {
     if (req.query.userId) {
+      if (!mongoose.Types.ObjectId.isValid(req.query.userId)) {
+        throw new AppError("Invalid userId", 400);
+      }
       return { user: req.query.userId };
     }
     return {};
@@ -12,8 +17,12 @@ const resolveQuery = (req) => {
   return { user: req.user._id };
 };
 
-export const exportCsv = async (req, res) => {
-  const records = await Attendance.find(resolveQuery(req)).populate("user", "name email").sort({ clockIn: -1 });
+export const exportCsv = asyncHandler(async (req, res) => {
+  const records = await Attendance.find(resolveQuery(req))
+    .populate("user", "name email")
+    .sort({ clockIn: -1 })
+    .limit(5000)
+    .lean();
 
   const rows = records.map((r) => ({
     employee: r.user?.name,
@@ -57,10 +66,14 @@ export const exportCsv = async (req, res) => {
   res.setHeader("Content-Type", "text/csv");
   res.setHeader("Content-Disposition", 'attachment; filename="attendance.csv"');
   res.send(csv);
-};
+});
 
-export const exportPdf = async (req, res) => {
-  const records = await Attendance.find(resolveQuery(req)).populate("user", "name email").sort({ clockIn: -1 }).limit(200);
+export const exportPdf = asyncHandler(async (req, res) => {
+  const records = await Attendance.find(resolveQuery(req))
+    .populate("user", "name email")
+    .sort({ clockIn: -1 })
+    .limit(200)
+    .lean();
 
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", 'attachment; filename="attendance.pdf"');
@@ -82,4 +95,4 @@ export const exportPdf = async (req, res) => {
   });
 
   doc.end();
-};
+});

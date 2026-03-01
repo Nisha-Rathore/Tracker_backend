@@ -7,6 +7,13 @@ import { setSocketServer } from "./config/socket.js";
 
 const basePort = Number(process.env.PORT || 5000);
 const maxPortRetries = Number(process.env.PORT_RETRIES || 10);
+const requiredEnv = ["MONGO_URI", "JWT_SECRET"];
+
+for (const name of requiredEnv) {
+  if (!process.env[name]) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+}
 
 const start = async () => {
   await connectDB();
@@ -89,6 +96,20 @@ const start = async () => {
   });
 
   listen(basePort);
+
+  const shutdown = (signal) => {
+    console.log(`${signal} received. Closing server...`);
+    server.close((err) => {
+      if (err) {
+        console.error("Error during server shutdown", err);
+        process.exit(1);
+      }
+      process.exit(0);
+    });
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 };
 
 start().catch((err) => {
